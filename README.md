@@ -80,8 +80,11 @@ Tests: `python -m unittest discover -s tests` (they generate their own synthetic
 
 ## Tested on
 
-- **Tested:** Windows 11 Pro, Python 3.12.10, CPU only.
-- **Not tested:** macOS, Linux, other Python versions, GPU/CUDA, other Whisper model sizes.
+- **Tested:** Windows 11 Pro only, Python 3.12.10, CPU only. Local-file mode and `--download` (against a local
+  HTTP server serving a self-generated video) pass the test suite there.
+- **Not tested:** macOS, Linux, other Python versions, GPU/CUDA, other Whisper model sizes, and
+  **downloading from Instagram with the current version of this code**. Instagram changes often and may
+  block or alter what `yt-dlp` can do; no result from an earlier version carries over.
   The code is plain Python and should be portable, but that is an expectation, not a result.
 
 ## License
@@ -97,7 +100,22 @@ below. Installing or redistributing them means complying with those licenses.
 | `imageio-ffmpeg` | BSD-2-Clause | the Python package; its wheel contains an ffmpeg binary |
 | ffmpeg binary inside `imageio-ffmpeg` | GPL v3 build | the binary I inspected reports `--enable-gpl --enable-version3`. This repo does not ship it; pip installs it on your machine. Redistributing that binary brings GPL obligations. |
 | `yt-dlp` (optional) | Unlicense | PyPI package only; its standalone executables bundle GPLv3+ code |
-| Whisper model weights `Systran/faster-whisper-small` | `mit` per its model card | The model actually downloaded (confirmed in `faster_whisper` source and the local cache, revision `536b0662742c02347bc0e980a01041f333bce120`). The card says it is a CTranslate2 conversion of `openai/whisper-small`, whose own card declares `apache-2.0`. The Systran card does not reconcile the two, so I list both and have not determined which governs. Model card read 2026-11-04. |
+| Whisper model weights `Systran/faster-whisper-small` | see note below | The model actually downloaded (confirmed in the `faster_whisper` source and the local cache, revision `536b0662742c02347bc0e980a01041f333bce120`). |
+
+Whisper model license, as stated by each source (read 2026-11-04):
+
+- OpenAI's official repository ([github.com/openai/whisper](https://github.com/openai/whisper), README and
+  `LICENSE`) says Whisper's code and model weights are released under the MIT License (`Copyright (c) 2022 OpenAI`).
+- The Hugging Face card of the downloaded conversion
+  ([Systran/faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small)) is tagged `license: mit`
+  and says it is a CTranslate2 conversion of `openai/whisper-small`.
+- The Hugging Face card of the original checkpoint
+  ([openai/whisper-small](https://huggingface.co/openai/whisper-small)) is tagged `apache-2.0`.
+
+The sources do not all use the same label, and I could not determine from them why. I do not treat this as an
+established license conflict; it may be a metadata inconsistency on Hugging Face. Two of the three sources say MIT.
+This is not a legal conclusion. If you redistribute the weights, check the sources yourself and include the
+notices they require.
 
 ## Limits
 
