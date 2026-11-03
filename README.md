@@ -69,7 +69,7 @@ Do not use this tool to identify people, and check the privacy law that applies 
 ## Install
 
 ```bash
-git clone <this-repo-url> ~/.claude/skills/instagram
+git clone https://github.com/echno35/instagram-video-analyzer-skill.git ~/.claude/skills/instagram
 cd ~/.claude/skills/instagram
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip
@@ -113,9 +113,8 @@ Whisper model license, as stated by each source (read 2026-11-04):
   ([openai/whisper-small](https://huggingface.co/openai/whisper-small)) is tagged `apache-2.0`.
 
 The sources do not all use the same label, and I could not determine from them why. I do not treat this as an
-established license conflict; it may be a metadata inconsistency on Hugging Face. Two of the three sources say MIT.
-This is not a legal conclusion. If you redistribute the weights, check the sources yourself and include the
-notices they require.
+established license conflict. Two of the three sources say MIT. This is not a legal conclusion. If you
+redistribute the weights, check the sources yourself and include the notices they require.
 
 ## Limits
 
