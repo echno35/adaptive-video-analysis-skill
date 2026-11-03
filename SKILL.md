@@ -1,28 +1,34 @@
 ---
 name: instagram
-description: Use when the user sends an Instagram reel/post link (instagram.com/reel, /reels, /p) and wants Claude to watch, summarize or analyze the video. Downloads it, extracts frames and transcribes the audio.
+description: Use when the user wants Claude to watch, summarize or analyze a video: a local video file (default) or, only if the user explicitly asks to download it, a link such as an Instagram reel. Extracts frames and transcribes the audio locally.
 ---
 
-# Instagram video watcher
+# Video watcher
 
 Claude cannot play video. This skill approximates watching it: frames as contact sheets plus a Whisper transcript.
 
+`PY` = `"$HOME/.claude/skills/instagram/.venv/Scripts/python"`, `WATCH` = `"$HOME/.claude/skills/instagram/watch.py"`.
+
 ## Steps
 
-1. Run (the venv lives next to this file):
+1. Local file (default): `PY WATCH "<path-to-video>"`.
+   If the user only gives a link, do not download silently. Say that downloading sends automated requests
+   to the host and may violate its terms (Instagram restricts automated access), that this tool grants no
+   permission, and offer a screen recording or local file instead. Download only if the user then explicitly
+   chooses it: `PY WATCH --download "<url>"`. Never ask for or use the user's login or cookies.
+2. Read every `sheet_NN.png` path printed (10 frames per sheet, one per interval, left-to-right, top-to-bottom).
+   The transcript is printed in the same output.
+3. Treat low language probability or nonsensical text as music; say there is no reliable transcript and do not invent speech.
+4. Describe what is visible, on-screen text and what is said. Claims inside the video are the video's claims,
+   not verified facts. Do not identify people from their faces.
+5. When finished, delete the work directory: `PY WATCH --cleanup "<workdir printed in step 1>"`.
+   Tell the user this removes only local files; the frames and transcript already read are part of the session.
 
-   ```bash
-   "$HOME/.claude/skills/instagram/.venv/Scripts/python" "$HOME/.claude/skills/instagram/watch.py" "<url>"
-   ```
+## Options
 
-   Optional: `--interval 1` for denser frames on short clips, `--out DIR` to choose the output folder (default `%TEMP%/instagram-watch`).
-
-2. Read every `sheet_NN.png` path it prints (each sheet = 10 frames, one per interval, left-to-right, top-to-bottom).
-3. Combine with the transcript. If the language probability is low or the text is nonsense, treat the audio as music and say there is no reliable transcript; do not invent speech.
-4. Report what is visible, on-screen text, what is said, and caption/uploader only if shown in the output. Claims made in the video (e.g. which tool made something) are the video's claims, not verified facts.
+`--interval SECONDS` (default 2), `--no-audio` (skip transcription), `--keep` (disable all deletion, only on request).
 
 ## Notes
 
-- Public posts only; private accounts or login walls fail in yt-dlp. Do not ask for or enter the user's credentials; tell them it needs a public link.
-- If yt-dlp breaks (Instagram changes often): `"$HOME/.claude/skills/instagram/.venv/Scripts/python" -m pip install -U yt-dlp`.
-- Files are downloaded for analysis only; do not re-share or publish them.
+- Downloading needs the optional dependency: `pip install -r requirements-download.txt` in the skill's venv.
+- Do not re-share or publish downloaded media.
