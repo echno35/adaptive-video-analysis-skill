@@ -67,7 +67,12 @@ def transcribe(video: Path, out: Path) -> str:
     with wave.open(str(wav)) as w:
         audio = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
     # CPU explicitly: CUDA libraries are often missing; a numpy array avoids a PyAV API mismatch
-    segs, info = WhisperModel("small", device="cpu", compute_type="int8").transcribe(audio)
+    try:  # cached model first, so a normal run makes no network request at all
+        model = WhisperModel("small", device="cpu", compute_type="int8", local_files_only=True)
+    except Exception:
+        print("Whisper model not cached: downloading Systran/faster-whisper-small from huggingface.co (first use only)", file=sys.stderr)
+        model = WhisperModel("small", device="cpu", compute_type="int8")
+    segs, info = model.transcribe(audio)
     lines = [f"[{s.start:6.1f}s] {s.text.strip()}" for s in segs]
     return f"language: {info.language} (p={info.language_probability:.2f})\n" + ("\n".join(lines) or "(no speech detected)")
 

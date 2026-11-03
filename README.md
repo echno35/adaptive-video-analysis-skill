@@ -3,7 +3,7 @@
 Lets Claude "watch" a video you give it. Claude cannot play video, so the tool approximates it:
 
 1. cuts the video into frames (one every 2 s) and tiles them into contact sheets (10 frames each)
-2. transcribes the audio locally with `faster-whisper` (CPU, nothing uploaded for this step)
+2. transcribes the audio locally with `faster-whisper` (CPU, the audio is not uploaded for this step)
 3. prints the sheet paths and the transcript so Claude can read them
 
 Not affiliated with, endorsed by, or sponsored by Meta, Instagram or Anthropic.
@@ -15,7 +15,19 @@ python watch.py my-video.mp4
 ```
 
 Typical sources: a screen recording you made, or a video you own or have permission to analyze.
-This mode makes no requests to any video platform.
+
+**Network behavior, precisely.** Local-file mode never connects to Instagram or any video platform. It is not
+"fully offline" in every case:
+
+| Situation | Network requests |
+|---|---|
+| `pip install` of the dependencies | yes (PyPI; the ffmpeg binary ships inside the `imageio-ffmpeg` wheel) |
+| First transcription, Whisper model not cached yet | yes: downloads `Systran/faster-whisper-small` (about 500 MB) from `huggingface.co` |
+| Later runs, model cached | none observed (0 connections in my test, see below) |
+| `--no-audio` | none (the model is never loaded) |
+
+Set `HF_HUB_OFFLINE=1` to forbid Hugging Face requests entirely. Note that frames and the transcript still go
+to Claude when it reads them (next sections), which is a network transfer by Claude Code, not by this script.
 
 ## Optional: downloading from a URL (explicit opt-in)
 
@@ -37,7 +49,7 @@ file when you can. Calling this "educational" does not change any of the above.
 |---|---|---|
 | Download (only with `--download`) | `yt-dlp` on your machine | `video.mp4` in a temp work dir |
 | Frames | `ffmpeg` on your machine | `sheet_NN.png` in the temp work dir |
-| Audio transcript | Whisper `small` on your machine (the model is downloaded once from Hugging Face) | `audio.wav` in the temp work dir; transcript is printed, and also written to `transcript.txt` only with `--keep` |
+| Audio transcript | Whisper `small` on your machine | `audio.wav` in the temp work dir; transcript is printed, and also written to `transcript.txt` only with `--keep` |
 | Analysis | The script **prints the transcript to stdout and the sheet paths**; the skill then has Claude Code read the sheets | Both the transcript text and the sheet images become part of your Claude session, i.e. they are sent to Anthropic like any other message content |
 
 Retention:
@@ -64,21 +76,28 @@ python -m venv .venv
 ```
 
 `SKILL.md` calls `.venv/Scripts/python` (Windows layout); on macOS/Linux change it to `.venv/bin/python`.
-The first run downloads the Whisper `small` model (about 500 MB). Tests:
-`python -m unittest discover -s tests` (they generate their own synthetic video, no third-party content).
+Tests: `python -m unittest discover -s tests` (they generate their own synthetic video, no third-party content).
 
-## Licenses of dependencies (checked from installed package metadata)
+## Tested on
 
-| Package | License | Notes |
+- **Tested:** Windows 11 Pro, Python 3.12.10, CPU only.
+- **Not tested:** macOS, Linux, other Python versions, GPU/CUDA, other Whisper model sizes.
+  The code is plain Python and should be portable, but that is an expectation, not a result.
+
+## License
+
+The code in this repository is licensed under the MIT License (see [LICENSE](LICENSE)). Third-party
+dependencies, model weights and binaries are **not** covered by it and remain under their own licenses, listed
+below. Installing or redistributing them means complying with those licenses.
+
+| Component | License | Notes |
 |---|---|---|
-| `faster-whisper` | MIT | |
-| `numpy` | BSD-3-Clause and others | |
-| `imageio-ffmpeg` | BSD-2-Clause | The package itself. It downloads/bundles an ffmpeg binary. |
-| ffmpeg binary used by `imageio-ffmpeg` | GPL v3 build | The binary I inspected reports `--enable-gpl --enable-version3`. This repo does **not** ship it; pip installs it on the user's machine. If you ever redistribute that binary you take on GPL obligations. |
-| `yt-dlp` (optional) | Unlicense | PyPI package only; its standalone executables bundle GPLv3+ code. |
-| Whisper `small` model weights | **not verified** | Loaded from Hugging Face by `faster-whisper`; I did not read the model card. Check it before redistributing anything. |
-
-This repo has no license file yet. Pick one before publishing.
+| `faster-whisper` | MIT | from package metadata |
+| `numpy` | BSD-3-Clause and others | from package metadata |
+| `imageio-ffmpeg` | BSD-2-Clause | the Python package; its wheel contains an ffmpeg binary |
+| ffmpeg binary inside `imageio-ffmpeg` | GPL v3 build | the binary I inspected reports `--enable-gpl --enable-version3`. This repo does not ship it; pip installs it on your machine. Redistributing that binary brings GPL obligations. |
+| `yt-dlp` (optional) | Unlicense | PyPI package only; its standalone executables bundle GPLv3+ code |
+| Whisper model weights `Systran/faster-whisper-small` | `mit` per its model card | The model actually downloaded (confirmed in `faster_whisper` source and the local cache, revision `536b0662742c02347bc0e980a01041f333bce120`). The card says it is a CTranslate2 conversion of `openai/whisper-small`, whose own card declares `apache-2.0`. The Systran card does not reconcile the two, so I list both and have not determined which governs. Model card read 2026-11-04. |
 
 ## Limits
 
