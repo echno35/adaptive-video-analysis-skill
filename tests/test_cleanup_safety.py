@@ -433,6 +433,138 @@ class ErrorPathTests(Base):
         self.assertEqual(Path(m["source_path"]).resolve(), self.video.resolve())
 
 
+class AccessErrorTests(Base):
+    """An access error while verifying or removing must never replace the real analysis error, and a direct --cleanup /
+    --keep-dir must report it in a controlled way (documented exit code, the directory named, no traceback)."""
+
+    @staticmethod
+    def denying_scandir(only_after=0):
+        """os.scandir that raises PermissionError for work dirs, optionally only from the (only_after+1)-th call on."""
+        real = os.scandir
+        calls = {}
+
+        def fake(path, *a, **k):
+            if "video-watch-" in str(path):
+                calls[str(path)] = calls.get(str(path), 0) + 1
+                if calls[str(path)] > only_after:
+                    raise PermissionError("simulated access denied")
+            return real(path, *a, **k)
+        return fake
+
+    def find_workdirs(self):
+        return sorted(p for p in self.tmp.glob("video-watch-*") if p.is_dir())
+
+    def run_analysis_expecting_error(self, patches):
+        old, saved, err = tempfile.tempdir, sys.argv, io.StringIO()
+        tempfile.tempdir = str(self.tmp)
+        sys.argv = ["watch.py", str(self.video), "--no-audio"]
+        caught = None
+        try:
+            with contextlib.ExitStack() as stack:
+                for pt in patches:
+                    stack.enter_context(pt)
+                stack.enter_context(contextlib.redirect_stderr(err))
+                stack.enter_context(contextlib.redirect_stdout(io.TextIOWrapper(io.BytesIO(), encoding="utf-8")))
+                try:
+                    watch.main()
+                except BaseException as e:      # we want to see exactly which exception reaches the caller
+                    caught = e
+        finally:
+            tempfile.tempdir, sys.argv = old, saved
+        return caught, err.getvalue()
+
+    # ---- regression: the original analysis error must survive a failing cleanup ----
+    def test_original_error_survives_a_permission_error_in_cleanup(self):
+        caught, err = self.run_analysis_expecting_error([
+            mock.patch.object(watch, "scan", side_effect=RuntimeError("original failure")),
+            mock.patch("os.scandir", self.denying_scandir())])
+        self.assertIsInstance(caught, RuntimeError, f"the cleanup error replaced the real one: {caught!r}")
+        self.assertEqual(str(caught), "original failure")
+        left = self.find_workdirs()
+        self.assertEqual(len(left), 1, "the work dir could not be removed, so it must still exist")
+        self.assertIn(str(left[0]), err)
+        self.assertIn("left in place", err)
+
+    def test_original_error_survives_an_oserror_that_escapes_verification(self):
+        # defence in depth: even an OSError that is NOT converted inside the removal code must not replace the real error
+        caught, err = self.run_analysis_expecting_error([
+            mock.patch.object(watch, "scan", side_effect=RuntimeError("original failure")),
+            mock.patch.object(watch, "remove_work_dir", side_effect=PermissionError("simulated"))])
+        self.assertIsInstance(caught, RuntimeError)
+        self.assertEqual(str(caught), "original failure")
+        self.assertIn("left in place", err)
+        self.assertIn("PermissionError", err)
+
+    def test_cleanup_bugs_that_are_not_oserrors_are_not_swallowed(self):
+        # the error path catches ExitError and OSError only; anything else is a bug in the cleanup code and must surface
+        caught, err = self.run_analysis_expecting_error([
+            mock.patch.object(watch, "scan", side_effect=RuntimeError("original failure")),
+            mock.patch.object(watch, "remove_work_dir", side_effect=TypeError("a bug"))])
+        self.assertIsInstance(caught, TypeError)
+        self.assertIsInstance(caught.__context__, RuntimeError, "the original error stays visible as the context")
+
+    # ---- direct --cleanup / --keep-dir ----
+    def test_cleanup_reports_an_access_error_during_verification(self):
+        d, src = self.make_workdir()
+        for force in (False, True):
+            with self.subTest(force=force), mock.patch("os.scandir", self.denying_scandir()):
+                code, out, err = self.run_main(["--cleanup", d] + (["--force"] if force else []))
+            self.assertEqual(code, 4, err)                    # existing meaning: could not verify it is safe
+            self.assertIn(str(d), err)
+            self.assertIn("PermissionError", err)
+            self.assertIn("nothing was removed", err)
+            self.assertNotIn("Traceback", err)
+            self.assertLess(len(err.splitlines()), 4)
+            self.assertTrue((d / "manifest.json").exists() and (d / "sheet_01.png").exists() and src.exists())
+
+    def test_cleanup_reports_an_access_error_while_listing_for_removal(self):
+        d, _ = self.make_workdir()
+        with mock.patch("os.scandir", self.denying_scandir(only_after=1)):      # verification passes, removal's listing fails
+            code, out, err = self.run_main(["--cleanup", d])
+        self.assertEqual(code, 5, err)                        # existing meaning: removal incomplete, directory named
+        self.assertIn(str(d), err)
+        self.assertNotIn("removed ", out)
+        self.assertTrue(d.exists() and (d / "manifest.json").exists(), "nothing deleted, still verifiable and retryable")
+        self.assertEqual(self.watch("--cleanup", d).returncode, 0)
+
+    def test_removal_is_never_reported_as_done_when_it_cannot_be_confirmed(self):
+        d = self.tmp / "something"
+        d.mkdir()
+        with mock.patch("os.lstat", side_effect=PermissionError("simulated")):
+            self.assertFalse(watch._gone(d))
+        with mock.patch("os.lstat", side_effect=FileNotFoundError()):
+            self.assertTrue(watch._gone(d))
+        self.assertFalse(watch._gone(d))
+
+    def test_keep_dir_reports_a_write_error_in_a_controlled_way(self):
+        d, _ = self.make_workdir()
+        real_write = Path.write_text
+
+        def deny(self_, *a, **k):
+            if self_.name == ".keep":
+                raise PermissionError("simulated")
+            return real_write(self_, *a, **k)
+        with mock.patch.object(Path, "write_text", deny):
+            code, out, err = self.run_main(["--keep-dir", d])
+        self.assertEqual(code, 1, err)
+        self.assertIn(str(d), err)
+        self.assertNotIn("Traceback", err)
+        self.assertFalse((d / ".keep").exists())
+
+    def test_keep_dir_reports_an_access_error_during_verification(self):
+        d, _ = self.make_workdir()
+        with mock.patch("os.scandir", self.denying_scandir()):
+            code, out, err = self.run_main(["--keep-dir", d])
+        self.assertEqual(code, 4, err)
+        self.assertFalse((d / ".keep").exists())
+
+    def test_the_safety_checks_are_not_loosened_by_access_error_handling(self):
+        # an access error is a refusal, never a pass: a dir that fails verification for another reason still exits 4
+        d, _ = self.make_workdir(extra=["notes.txt"])
+        self.assertEqual(self.watch("--cleanup", d, "--force").returncode, 4)
+        self.assertTrue((d / "notes.txt").exists())
+
+
 class EndToEndTests(Base):
     def test_local_source_is_untouched_by_every_command(self):
         before = self.sha(self.video)

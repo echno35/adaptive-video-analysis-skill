@@ -150,14 +150,24 @@ def write_marker(out: Path, mode: str, source_path):
 
 def verify_work_dir(d) -> dict:
     """Decide whether d is a work dir this tool may delete. Raises ExitError(EXIT_REFUSED) when that cannot be established.
-    Returns {'path': resolved Path, 'kept': bool}. Checks are made on the resolved path, not on the string given."""
+    Returns {'path': resolved Path, 'kept': bool}. Checks are made on the resolved path, not on the string given.
+    An OSError while reading the directory (for example access denied) means it could not be verified: that is a refusal."""
+    try:
+        return _verify_work_dir(d)
+    except OSError as e:
+        raise ExitError(EXIT_REFUSED, f"refused: could not read {d} to verify it ({type(e).__name__}); nothing was removed") from e
+
+
+def _verify_work_dir(d) -> dict:
     p = Path(d)
     if is_link(p):
         raise ExitError(EXIT_REFUSED, f"refused: {p} is a link, not a work directory")
     try:
         rp = p.resolve(strict=True)
-    except (OSError, RuntimeError):
+    except FileNotFoundError:
         raise ExitError(EXIT_ERROR, f"error: {p} does not exist (already removed?)")
+    except RuntimeError:                       # symlink loop
+        raise ExitError(EXIT_REFUSED, f"refused: {p} cannot be resolved")
     if not rp.is_dir():
         raise ExitError(EXIT_REFUSED, f"refused: {rp} is not a directory")
     if not rp.name.startswith(PREFIX) or _norm(rp.parent) != _norm(_temp_dir()):
@@ -217,14 +227,18 @@ def _remove_entries(rp: Path, errors: list):
     everything else is gone, so a partly failed removal leaves a directory that can still be verified and retried."""
     last_names = (MARKER, "manifest.json", "manifest.json.tmp", KEEP_MARKER)
     files, subdirs, last = [], [], []
-    for e in os.scandir(rp):
-        if e.is_dir(follow_symlinks=False):
-            subdirs.append(e.path)
-            files += [s.path for s in os.scandir(e.path)]
-        elif e.name in last_names:
-            last.append(e.path)
-        else:
-            files.append(e.path)
+    try:
+        for e in os.scandir(rp):
+            if e.is_dir(follow_symlinks=False):
+                subdirs.append(e.path)
+                files += [s.path for s in os.scandir(e.path)]
+            elif e.name in last_names:
+                last.append(e.path)
+            else:
+                files.append(e.path)
+    except OSError as exc:                     # cannot even list it: delete nothing, report it as incomplete
+        errors.append(type(exc).__name__)
+        return
 
     def attempt(fn, p):
         try:
@@ -258,15 +272,30 @@ def remove_work_dir(d, force: bool = False) -> Path:
         raise ExitError(EXIT_KEPT, f"not removed: {rp} is marked kept (--keep / --keep-dir); add --force to remove it")
     errors: list = []
     _remove_entries(rp, errors)
-    if rp.exists():
+    if not _gone(rp):
         first = f", first error: {errors[0]}" if errors else ""
         raise ExitError(EXIT_INCOMPLETE, f"removal incomplete: {rp} still exists ({len(errors)} problem(s){first})")
     return rp
 
 
+def _gone(path) -> bool:
+    """True only when the path is confirmed absent. os.path.exists() would turn an access error into 'does not exist',
+    which could report a removal that did not happen as done."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def mark_kept(d) -> Path:
     rp = verify_work_dir(d)["path"]
-    (rp / KEEP_MARKER).write_text("kept by --keep / --keep-dir; not removed by the stale sweep, only by --cleanup --force\n")
+    try:
+        (rp / KEEP_MARKER).write_text("kept by --keep / --keep-dir; not removed by the stale sweep, only by --cleanup --force\n")
+    except OSError as e:
+        raise ExitError(EXIT_ERROR, f"error: could not mark {rp} as kept ({type(e).__name__})") from e
     return rp
 
 
@@ -661,10 +690,16 @@ def analyze(a):
         if a.keep:
             print(f"work dir kept (--keep): {out}", file=sys.stderr)
         else:
-            try:                    # same verification as --cleanup; a failure here must not hide the original error
+            # Best-effort cleanup inside an already failing path: it must never replace the original error, and a failure
+            # must never be silent. Only the expected failure classes are caught: ExitError (refused / incomplete) and OSError
+            # (an access error that escaped). Anything else is a bug in the cleanup code and is allowed to surface; Python
+            # then shows the original error as its context. The caught failure is reported with the directory's path.
+            try:
                 remove_work_dir(out)
             except ExitError as e:
                 print(f"work dir left in place: {out} ({e})", file=sys.stderr)
+            except OSError as e:
+                print(f"work dir left in place: {out} (cleanup failed: {type(e).__name__})", file=sys.stderr)
         raise
 
 
