@@ -1,4 +1,4 @@
-# video-watch (Claude Code skill)
+# Adaptive Video Analysis Skill
 
 Lets Claude "watch" a video you give it. Claude cannot play video, so the tool prepares evidence locally and
 Claude reads it:
