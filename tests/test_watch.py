@@ -45,7 +45,8 @@ class WatchTest(unittest.TestCase):
         return list(self.tmp.glob("video-watch-*"))
 
     def test_local_file_default_cleanup(self):
-        r = self.watch(str(self.video), "--no-audio", "--interval", "1")
+        # v0.2 removed --interval: frames come from the change scan, not a fixed sampling interval
+        r = self.watch(str(self.video), "--no-audio")
         self.assertEqual(r.returncode, 0, r.stderr)
         (d,) = self.workdirs()
         self.assertTrue(list(d.glob("sheet_*.png")))
@@ -61,8 +62,11 @@ class WatchTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         (d,) = self.workdirs()
         self.assertTrue((d / "audio.wav").exists())
-        self.assertTrue((d / "transcript.txt").exists())
-        self.assertIn("transcript:", r.stdout)
+        # v0.2: the transcript is always stored as transcript.json (needed for --transcript) and the
+        # stdout section is called SPOKEN; --keep additionally marks the dir so the stale sweep skips it
+        self.assertTrue((d / "transcript.json").exists())
+        self.assertTrue((d / ".keep").exists())
+        self.assertIn("SPOKEN", r.stdout)
 
     def test_transcript_is_printed_to_stdout(self):
         r = self.watch(str(self.video))

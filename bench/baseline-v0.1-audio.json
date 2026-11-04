@@ -1,0 +1,25 @@
+{
+ "v0.1 (cab7e87)": {
+  "static": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1800x1280",
+    "1800x1280"
+   ],
+   "total_pixels": 4608000,
+   "stdout_chars": 511,
+   "runtime_s": 3.9,
+   "events_visible": []
+  },
+  "silent": {
+   "rc": 1,
+   "images": 0,
+   "sizes": [],
+   "total_pixels": 0,
+   "stdout_chars": 0,
+   "runtime_s": 0.5,
+   "events_visible": []
+  }
+ }
+}
