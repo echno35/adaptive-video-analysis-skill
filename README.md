@@ -120,7 +120,7 @@ this tool are **our own budget**, not a server limit.
 ## Install
 
 ```bash
-git clone https://github.com/echno35/instagram-video-analyzer-skill.git ~/.claude/skills/instagram
+git clone https://github.com/echno35/adaptive-video-analysis-skill.git ~/.claude/skills/instagram
 cd ~/.claude/skills/instagram
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip
