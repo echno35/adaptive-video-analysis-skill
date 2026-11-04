@@ -1,0 +1,274 @@
+{
+ "v0.2 (working tree)": {
+  "static": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "680x398"
+   ],
+   "total_pixels": 270640,
+   "stdout_chars": 1135,
+   "runtime_s": 2.3,
+   "events_visible": [],
+   "events_detected_in_scan": [],
+   "candidates": 3
+  },
+  "small_change": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "804x452"
+   ],
+   "total_pixels": 363408,
+   "stdout_chars": 1255,
+   "runtime_s": 1.1,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 4
+  },
+  "flash_02": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "804x680"
+   ],
+   "total_pixels": 546720,
+   "stdout_chars": 1145,
+   "runtime_s": 1.1,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 5
+  },
+  "flash_14": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "804x680"
+   ],
+   "total_pixels": 546720,
+   "stdout_chars": 1147,
+   "runtime_s": 1.1,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 5
+  },
+  "flash_27": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "804x680"
+   ],
+   "total_pixels": 546720,
+   "stdout_chars": 1147,
+   "runtime_s": 1.1,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 5
+  },
+  "noise_03": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2238,
+   "runtime_s": 3.9,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 150
+  },
+  "noise_14": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2241,
+   "runtime_s": 4.0,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 150
+  },
+  "noise_26": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2240,
+   "runtime_s": 3.9,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 150
+  },
+  "scroll_04": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2243,
+   "runtime_s": 2.7,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 150
+  },
+  "scroll_20": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2244,
+   "runtime_s": 2.7,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 150
+  },
+  "scroll_28": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2243,
+   "runtime_s": 2.7,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 150
+  },
+  "long_005": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2401,
+   "runtime_s": 4.5,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 62
+  },
+  "long_095": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2404,
+   "runtime_s": 4.4,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 62
+  },
+  "long_170": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2368,
+   "runtime_s": 4.3,
+   "events_visible": [
+    true
+   ],
+   "events_detected_in_scan": [
+    true
+   ],
+   "candidates": 62
+  },
+  "small_text": {
+   "rc": 0,
+   "images": 2,
+   "sizes": [
+    "1208x908",
+    "1208x908"
+   ],
+   "total_pixels": 2193728,
+   "stdout_chars": 2254,
+   "runtime_s": 2.8,
+   "events_visible": [],
+   "events_detected_in_scan": [],
+   "candidates": 50
+  },
+  "silent": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "400x224"
+   ],
+   "total_pixels": 89600,
+   "stdout_chars": 1121,
+   "runtime_s": 0.5,
+   "events_visible": [],
+   "events_detected_in_scan": [],
+   "candidates": 1
+  }
+ }
+}

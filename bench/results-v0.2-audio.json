@@ -1,0 +1,30 @@
+{
+ "v0.2 (working tree)": {
+  "static": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "680x398"
+   ],
+   "total_pixels": 270640,
+   "stdout_chars": 1317,
+   "runtime_s": 4.7,
+   "events_visible": [],
+   "events_detected_in_scan": [],
+   "candidates": 3
+  },
+  "silent": {
+   "rc": 0,
+   "images": 1,
+   "sizes": [
+    "400x224"
+   ],
+   "total_pixels": 89600,
+   "stdout_chars": 1109,
+   "runtime_s": 0.5,
+   "events_visible": [],
+   "events_detected_in_scan": [],
+   "candidates": 1
+  }
+ }
+}
