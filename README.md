@@ -66,16 +66,41 @@ file when you can. Calling this "educational" does not change any of the above.
 | `transcript.json` (all segments, incl. low-confidence text) | temp work dir | `--cleanup` |
 | `manifest.json` (candidate times, scores, budget) | temp work dir | `--cleanup` |
 
-- **On errors** during an analysis the whole work dir is deleted. A failed `--detail` removes its partial images
-  and leaves the manifest and budget unchanged.
-- **Stale sweep**: at the start of each new analysis (not on `--detail`, `--transcript` or `--cleanup`), work
-  dirs older than one hour are deleted, including any retained download. There is no background process, so
-  nothing is deleted "after an hour" unless you run another analysis.
-- **`--keep`** disables all deletion (video and audio stay) and exempts the work dir from the stale sweep; only
-  `--cleanup` removes it.
-- **`--cleanup`** only deletes directories this tool created in the system temp folder.
+- **On errors** during an analysis the work dir is removed with the same checks as `--cleanup` (below). If it cannot
+  be removed, the directory is named on stderr and the original error is still raised. With `--keep` the directory
+  is left and named on stderr. A failed `--detail` removes its partial images and leaves the manifest and budget unchanged.
+- **Stale sweep**: at the start of each new analysis (not on `--detail`, `--transcript`, `--cleanup` or `--keep-dir`),
+  work dirs older than one hour are removed, including any retained download, but only if they are not kept and
+  pass the same verification as `--cleanup`; others are left in place and counted in one note on stderr. There is
+  no background process, so nothing is deleted "after an hour" unless you run another analysis.
+- **`--keep`** disables all deletion (video and audio stay) and exempts the work dir from the stale sweep. If you
+  decide later, `--keep-dir DIR` marks an existing, verified work dir the same way.
+- **`--cleanup DIR`** removes a work dir this tool created, checks that it is gone, and tells you the outcome by
+  exit code. A kept dir is **not** removed unless you add `--force`; `--force` lifts only that protection.
 - Cleanup removes local files only. **It does not delete anything already sent to a Claude session.**
   Check Anthropic's current privacy and retention settings for that.
+
+Exit codes of `--cleanup` and `--keep-dir`:
+
+| Code | Meaning |
+|---|---|
+| 0 | done; for `--cleanup` the directory was removed and no longer exists |
+| 1 | other error (usage, the path does not exist, ...) |
+| 3 | **kept**: not removed because the dir is marked kept (`--keep` / `--keep-dir`); add `--force` to remove it |
+| 4 | **refused**: it could not be verified as safe to remove; nothing was touched |
+| 5 | **removal incomplete**: something is left; the remaining directory is named in the message |
+
+What "verified" means (same logic for `--cleanup`, `--keep-dir`, error cleanup and the stale sweep; `--force` bypasses none of it):
+the target is resolved first; it must sit directly in the system temp folder, carry this tool's name prefix, not be a
+link or junction, and contain no link; it must have this tool's ownership marker (written first thing in every
+analysis) or a valid manifest, and a corrupt manifest or marker is a refusal; it may hold only file names this tool
+creates (a download adds `video.*`); and a local source video must not lie inside it. Removal does not follow links,
+deletes the marker and manifest last (so a half-failed removal can be retried), and is checked afterwards. Your
+local input file is never touched.
+
+Limits: verification and removal are not atomic, and this is not a defence against a hostile local user who can change
+the temp folder while the command runs. Work dirs made by v0.1, or without marker and manifest, are never removed by the
+tool (delete them by hand). Failures are reported as a message with the directory, not as a list of its files.
 
 Whether frames or transcript contain other people's faces, voices or usernames depends on the video. Do not
 use this tool to identify people, and check the privacy law that applies to you. Text and speech in a video
@@ -139,6 +164,31 @@ Totals are sums over all 16 videos, so each 3-variant row counts three times. Ot
 - 13/13 events in the images is a result on these videos, not a guarantee: with more candidates than the cap, the
   promise is only "shown or listed as not shown".
 
+## Exploratory pilot: one clip, two questions (limited)
+
+This is a small exploratory check, not an evaluation of the tool. It ran on commit `db87b1b`. Since then
+`git diff db87b1b -- watch.py` shows changes only in work-directory handling (ownership marker, verified removal,
+`--cleanup` / `--keep-dir` / `--force`, error cleanup, stale sweep, the last output line of a `--keep` run) and in
+the help text; the scanning, frame-selection, `--detail` and transcription code is unchanged. `SKILL.md` changed in
+its finishing step and the README, tests and `.gitignore` also changed. The pilot was not re-run on the new code.
+
+- **What was run:** one local 82.6 s vertical clip, two questions (one general, one targeted), both versions, one run per
+  version and question (4 runs), `claude-sonnet-5-5` at medium effort, headless, each session given only its own
+  version's skill text. A first attempt was discarded because of an error in my evaluation scripts.
+- **Measured (the runs' own records):** Claude opened 5 overview sheets with v0.1 and 2 with v0.2 in each question
+  (about 11.5 MP and 2.2 MP of images passed to the model in those runs). v0.2 did not call `--detail` in its two pilot runs.
+- **Token usage:** input, output, cache-write and cache-read fields were **recorded for every run**, but they are
+  not tabulated or summarised here, and **no general token-saving claim is made**: one run per cell, one clip, and the
+  cache-read field counts the conversation history again on every turn.
+- **Quality:** the author's scoring recorded no reported errors in the four answers, but some scoring fields were
+  left empty or ambiguous, one question pair was only partly blind, and a validator error was fixed after the runs.
+  **Quality equivalence was not established.**
+- **One separate observation (one question, one run):** for a question about small text near the start of the clip,
+  Claude requested `--detail` without being told to (7 frames produced, 2 opened). The command ran successfully and the
+  author confirmed the answer and the opened frame. Whether the text was readable in the overview and whether
+  tokens were saved were **not determined**; the overview had no tile at that moment, so the call may reflect a time-coverage gap rather than a readability problem.
+- **Not claimed:** token or cost savings, speed, general quality equivalence, anything about other videos.
+
 ## Compatibility changes in v0.2
 
 - `--interval` was removed. Frames are chosen by change detection; for denser frames use
@@ -149,6 +199,8 @@ Totals are sums over all 16 videos, so each 3-variant row counts three times. Ot
 - The transcript is stored as `transcript.json` in the work dir until `--cleanup` (v0.1 wrote `transcript.txt`
   only with `--keep`). Low-confidence segments are listed by time instead of printed.
 - `--keep` work dirs are now exempt from the stale sweep (v0.1 could delete them on a later run).
+- `--cleanup` is stricter: it verifies the directory first, checks the result afterwards, and has documented exit codes
+  (0, 1, 3, 4, 5); a kept dir needs `--force`; `--keep-dir DIR` is new. A refused removal used to exit 1, now 4.
 - Unchanged: local file is the default, download is opt-in, a downloaded video is deleted at the end of the run
   unless `--retain-source` or `--keep`.
 

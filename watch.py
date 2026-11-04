@@ -5,12 +5,25 @@ Usage:
   watch.py --download URL             opt in to downloading the video with yt-dlp
   watch.py --detail DIR --range A-B   extra full-resolution frames from one time range (--fps, --crop)
   watch.py --transcript DIR           print stored transcript segments (--range, --all)
-  watch.py --cleanup DIR              delete a work directory created by this tool
+  watch.py --cleanup DIR [--force]    delete a work directory created by this tool (verified before and after)
+  watch.py --keep-dir DIR             mark an existing work directory as kept (exempt from the stale sweep)
 
 Pipeline: the whole video is scanned locally at SCAN_FPS; frames that differ from the previous
 candidate (largest per-block colour change) become candidates. At most OVERVIEW_CAP candidates are
 put on labelled overview sheets; every candidate that is not shown is reported as an omitted interval
 so Claude can ask for it with --detail. Retention is described in README.md.
+
+Removal safety (same checks for --cleanup, --keep-dir, error cleanup and the stale sweep): the target is resolved,
+must sit directly in the temp folder with this tool's name prefix, must not be a link, must carry this tool's marker
+or a valid manifest, must hold only files this tool creates, and must not contain the user's local source video.
+--force only lifts the "kept" protection; it never bypasses these checks.
+
+exit codes (--cleanup / --keep-dir):
+  0  done and verified (removed: the directory no longer exists)
+  1  other error (usage, missing path, ...)
+  3  kept: not removed because the directory is marked kept (--keep / --keep-dir); add --force to remove it
+  4  refused: could not verify that it is safe to remove (not ours, link, bad manifest, unexpected file, source inside)
+  5  removal incomplete: something is left; the remaining directory is named in the message
 """
 import argparse
 import json
@@ -19,6 +32,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -79,16 +93,206 @@ def run(cmd, **kw):
 
 # ---------- work directories ----------
 
+MARKER = ".video-watch"          # written first thing in every work dir: proves who created it and what its source is
+EXIT_OK, EXIT_ERROR, EXIT_KEPT, EXIT_REFUSED, EXIT_INCOMPLETE = 0, 1, 3, 4, 5
+# the only names this tool ever creates in a work dir (video.* only for downloads; detail_tmp_NN is a transient folder)
+OWN_FILES = re.compile(r"^(\.video-watch|\.keep|manifest\.json(\.tmp)?|transcript\.json|audio\.wav|_first\.png|_scan\.log"
+                       r"|sheet_\d+\.png|detail_\d+_\d+_[\d.]+s\.png)$")
+OWN_DOWNLOAD_FILES = re.compile(r"^video\..+$")
+OWN_SUBDIR = re.compile(r"^detail_tmp_\d+$")
+
+
+class ExitError(Exception):
+    """A failure with a documented exit code."""
+
+    def __init__(self, code: int, msg: str):
+        super().__init__(msg)
+        self.code = code
+
+
+def is_link(p) -> bool:
+    """Symlink, or on Windows a junction / any reparse point. Never follows the link."""
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _norm(p) -> str:
+    return os.path.normcase(os.path.normpath(str(p)))
+
+
+def _inside(child, parent) -> bool:
+    c, p = _norm(child), _norm(parent).rstrip(os.sep) + os.sep
+    return c == p.rstrip(os.sep) or c.startswith(p)
+
+
+def _temp_dir() -> Path:
+    return Path(tempfile.gettempdir()).resolve()
+
+
+def _read_json(p: Path):
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def is_work_dir(path: Path) -> bool:
-    return path.is_dir() and path.name.startswith(PREFIX) and path.resolve().parent == Path(tempfile.gettempdir()).resolve()
+    return path.is_dir() and not is_link(path) and path.name.startswith(PREFIX) and _norm(path.resolve().parent) == _norm(_temp_dir())
+
+
+def write_marker(out: Path, mode: str, source_path):
+    (out / MARKER).write_text(json.dumps({"tool": "video-watch", "version": VERSION, "mode": mode,
+                                          "source_path": source_path, "created": time.time()}), encoding="utf-8")
+
+
+def verify_work_dir(d) -> dict:
+    """Decide whether d is a work dir this tool may delete. Raises ExitError(EXIT_REFUSED) when that cannot be established.
+    Returns {'path': resolved Path, 'kept': bool}. Checks are made on the resolved path, not on the string given."""
+    p = Path(d)
+    if is_link(p):
+        raise ExitError(EXIT_REFUSED, f"refused: {p} is a link, not a work directory")
+    try:
+        rp = p.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ExitError(EXIT_ERROR, f"error: {p} does not exist (already removed?)")
+    if not rp.is_dir():
+        raise ExitError(EXIT_REFUSED, f"refused: {rp} is not a directory")
+    if not rp.name.startswith(PREFIX) or _norm(rp.parent) != _norm(_temp_dir()):
+        raise ExitError(EXIT_REFUSED, f"refused: {rp} is not a work directory created by this tool")
+
+    marker = None
+    if (rp / MARKER).exists():
+        marker = _read_json(rp / MARKER)
+        if not (isinstance(marker, dict) and marker.get("tool") == "video-watch" and marker.get("mode") in ("local", "download")):
+            raise ExitError(EXIT_REFUSED, f"refused: the ownership marker in {rp} is unreadable")
+    manifest = None
+    if (rp / "manifest.json").exists():
+        manifest = _read_json(rp / "manifest.json")
+        src = manifest.get("source") if isinstance(manifest, dict) else None
+        if not (isinstance(src, dict) and src.get("kind") in ("local", "download") and isinstance(src.get("path"), str)
+                and isinstance(manifest.get("version"), str)):
+            raise ExitError(EXIT_REFUSED, f"refused: the manifest in {rp} is unreadable or invalid, cannot verify it is safe to remove")
+    if marker is None and manifest is None:
+        raise ExitError(EXIT_REFUSED, f"refused: {rp} has neither this tool's marker nor a manifest, cannot verify it")
+
+    kind = manifest["source"]["kind"] if manifest else marker["mode"]
+    if manifest and marker and manifest["source"]["kind"] != marker["mode"]:
+        raise ExitError(EXIT_REFUSED, f"refused: manifest and marker of {rp} disagree about the source kind")
+    source_path = manifest["source"]["path"] if manifest else marker.get("source_path")
+    if not isinstance(source_path, str) or not source_path:
+        raise ExitError(EXIT_REFUSED, f"refused: no recorded source for {rp}, cannot verify it")
+    resolved_source = Path(source_path).resolve()
+    if kind == "local" and _inside(resolved_source, rp):
+        raise ExitError(EXIT_REFUSED, f"refused: the local source video lies inside {rp}; it will not be removed")
+    if kind == "download" and _norm(resolved_source) != _norm(rp / "video.mp4"):
+        raise ExitError(EXIT_REFUSED, f"refused: the recorded download of {rp} is not its own video file")
+
+    for entry in os.scandir(rp):                                      # never follows links
+        if is_link(entry.path):
+            raise ExitError(EXIT_REFUSED, f"refused: {rp} contains a link ({entry.name}); it will not be followed")
+        if entry.is_dir(follow_symlinks=False):
+            if not OWN_SUBDIR.match(entry.name):
+                raise ExitError(EXIT_REFUSED, f"refused: unexpected folder in {rp}: {entry.name}")
+            for sub in os.scandir(entry.path):
+                if is_link(sub.path) or sub.is_dir(follow_symlinks=False) or not OWN_FILES.match(sub.name):
+                    raise ExitError(EXIT_REFUSED, f"refused: unexpected item in {rp} ({entry.name})")
+        elif not (OWN_FILES.match(entry.name) or (kind == "download" and OWN_DOWNLOAD_FILES.match(entry.name))):
+            raise ExitError(EXIT_REFUSED, f"refused: unexpected file in {rp}: {entry.name}")
+    return {"path": rp, "kept": (rp / KEEP_MARKER).exists()}
+
+
+def _unlink(p):                                # indirection so that tests can simulate removal failures
+    os.unlink(p)
+
+
+def _rmdir(p):
+    os.rmdir(p)
+
+
+def _remove_entries(rp: Path, errors: list):
+    """Remove a verified work dir without following links. The ownership marker and manifest go LAST and only if
+    everything else is gone, so a partly failed removal leaves a directory that can still be verified and retried."""
+    last_names = (MARKER, "manifest.json", "manifest.json.tmp", KEEP_MARKER)
+    files, subdirs, last = [], [], []
+    for e in os.scandir(rp):
+        if e.is_dir(follow_symlinks=False):
+            subdirs.append(e.path)
+            files += [s.path for s in os.scandir(e.path)]
+        elif e.name in last_names:
+            last.append(e.path)
+        else:
+            files.append(e.path)
+
+    def attempt(fn, p):
+        try:
+            fn(p)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            try:                               # a read-only file is the usual Windows failure: clear the flag, retry once
+                os.chmod(p, stat.S_IWRITE)
+                fn(p)
+            except OSError as e2:
+                errors.append(type(e2).__name__)
+
+    for p in files:
+        attempt(_unlink, p)
+    for p in subdirs:
+        attempt(_rmdir, p)
+    if errors:
+        return
+    for p in last:
+        attempt(_unlink, p)
+    if not errors:
+        attempt(_rmdir, str(rp))
+
+
+def remove_work_dir(d, force: bool = False) -> Path:
+    """Verify, remove, then check that it is really gone. Returns the removed path or raises ExitError."""
+    info = verify_work_dir(d)
+    rp = info["path"]
+    if info["kept"] and not force:
+        raise ExitError(EXIT_KEPT, f"not removed: {rp} is marked kept (--keep / --keep-dir); add --force to remove it")
+    errors: list = []
+    _remove_entries(rp, errors)
+    if rp.exists():
+        first = f", first error: {errors[0]}" if errors else ""
+        raise ExitError(EXIT_INCOMPLETE, f"removal incomplete: {rp} still exists ({len(errors)} problem(s){first})")
+    return rp
+
+
+def mark_kept(d) -> Path:
+    rp = verify_work_dir(d)["path"]
+    (rp / KEEP_MARKER).write_text("kept by --keep / --keep-dir; not removed by the stale sweep, only by --cleanup --force\n")
+    return rp
 
 
 def sweep_stale():
-    """Runs only at the start of a new analysis; there is no background deletion."""
-    now = time.time()
-    for d in Path(tempfile.gettempdir()).glob(PREFIX + "*"):
-        if is_work_dir(d) and not (d / KEEP_MARKER).exists() and now - d.stat().st_mtime > STALE_SECONDS:
-            shutil.rmtree(d, ignore_errors=True)
+    """Runs only at the start of a new analysis; there is no background deletion. Uses the same verification as --cleanup:
+    a stale directory that cannot be verified as safe is left in place."""
+    now, left = time.time(), 0
+    try:
+        candidates = list(Path(tempfile.gettempdir()).glob(PREFIX + "*"))
+    except OSError:
+        return
+    for d in candidates:
+        try:
+            if now - os.lstat(d).st_mtime <= STALE_SECONDS or not (d.is_dir() or is_link(d)):
+                continue
+            remove_work_dir(d)
+        except ExitError as e:
+            if e.code == EXIT_KEPT:
+                continue
+            left += 1
+            if e.code == EXIT_INCOMPLETE:
+                print(f"warning: stale work dir not fully removed: {e}", file=sys.stderr)
+        except OSError:
+            left += 1
+    if left:
+        print(f"note: {left} stale work dir(s) in the temp folder were left in place (kept, or not verifiable as safe to remove)", file=sys.stderr)
 
 
 def load_manifest(d: Path) -> dict:
@@ -409,8 +613,11 @@ def analyze(a):
     sweep_stale()
     out = Path(tempfile.mkdtemp(prefix=PREFIX))
     try:
+        # first thing: say who owns this dir and what its source is, so that later removal can be verified even after a crash
+        write_marker(out, "download" if a.download else "local",
+                     str(out.resolve() / "video.mp4") if a.download else str(Path(a.file).resolve()))
         if a.keep:
-            (out / KEEP_MARKER).write_text("kept by --keep; not removed by the stale sweep, only by --cleanup\n")
+            (out / KEEP_MARKER).write_text("kept by --keep; not removed by the stale sweep, only by --cleanup --force\n")
         if a.download:
             video = download(a.download, out)
             source = {"kind": "download", "path": str(video), "retained": bool(a.retain_source or a.keep)}
@@ -451,8 +658,13 @@ def analyze(a):
                 Path(source["path"]).unlink(missing_ok=True)
         print_overview(out, m, tr)
     except BaseException:
-        if not a.keep:
-            shutil.rmtree(out, ignore_errors=True)
+        if a.keep:
+            print(f"work dir kept (--keep): {out}", file=sys.stderr)
+        else:
+            try:                    # same verification as --cleanup; a failure here must not hide the original error
+                remove_work_dir(out)
+            except ExitError as e:
+                print(f"work dir left in place: {out} ({e})", file=sys.stderr)
         raise
 
 
@@ -489,7 +701,10 @@ def print_overview(out, m, tr):
     p.append(produced_summary(m))
     p.append(f"detail budget left: {DETAIL_MAX_CALLS} calls, {DETAIL_MAX_IMAGES} images "
              f'(watch.py --detail "{out}" --range A-B [--fps F] [--crop x,y,w,h])')
-    p.append(f'when finished: watch.py --cleanup "{out}"')
+    if m.get("keep"):
+        p.append(f'kept (--keep): not removed by the stale sweep; remove it later with: watch.py --cleanup "{out}" --force')
+    else:
+        p.append(f'when finished: watch.py --cleanup "{out}"')
     print("\n".join(p))
 
 
@@ -616,7 +831,10 @@ def main():
     ap.add_argument("--crop", metavar="x,y,w,h", help="crop for --detail as fractions of the frame")
     ap.add_argument("--allow-more", action="store_true", help="exceed the cumulative detail budget (user request only)")
     ap.add_argument("--all", action="store_true", help="with --transcript: include low-confidence segments")
-    ap.add_argument("--cleanup", metavar="DIR", help="delete a work directory created by this tool and exit")
+    ap.add_argument("--cleanup", metavar="DIR", help="delete a work directory created by this tool and exit (see exit codes)")
+    ap.add_argument("--force", action="store_true",
+                    help="with --cleanup: also remove a directory marked kept; does NOT bypass any safety check")
+    ap.add_argument("--keep-dir", metavar="DIR", help="mark an existing, verified work directory as kept and exit")
     ap.add_argument("--interval", help=argparse.SUPPRESS)   # removed in v0.2; kept only to explain why
     a = ap.parse_args()
 
@@ -624,12 +842,14 @@ def main():
         if a.interval is not None:
             raise UsageError("--interval was removed in v0.2: frames are now chosen by change detection. "
                              "For denser frames from a time range use --detail WORKDIR --range A-B --fps F.")
+        if a.force and not a.cleanup:
+            raise UsageError("--force only applies to --cleanup")
         if a.cleanup:
-            d = Path(a.cleanup)
-            if not is_work_dir(d):
-                raise UsageError(f"refusing to delete {d}: not a work directory created by this tool")
-            shutil.rmtree(d)
-            print(f"removed {d}")
+            rp = remove_work_dir(a.cleanup, force=a.force)
+            print(f"removed {rp} (verified: the directory no longer exists)")
+        elif a.keep_dir:
+            rp = mark_kept(a.keep_dir)
+            print(f'marked kept: {rp} (exempt from the stale sweep; remove only with: watch.py --cleanup "{rp}" --force)')
         elif a.detail:
             if not a.range:
                 raise UsageError("--detail needs --range A-B")
@@ -642,6 +862,9 @@ def main():
             if a.retain_source and not a.download:
                 raise UsageError("--retain-source only applies to --download (local files are read in place)")
             analyze(a)
+    except ExitError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(e.code)
     except UsageError as e:
         sys.exit(f"error: {e}")
 
